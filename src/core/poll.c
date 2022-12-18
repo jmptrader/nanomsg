@@ -46,7 +46,6 @@ int nn_poll (struct nn_pollfd *fds, int nfds, int timeout)
             sz = sizeof (fd);
             rc = nn_getsockopt (fds [i].fd, NN_SOL_SOCKET, NN_RCVFD, &fd, &sz);
             if (nn_slow (rc < 0)) {
-                errno = -rc;
                 return -1;
             }
             nn_assert (sz == sizeof (fd));
@@ -56,7 +55,6 @@ int nn_poll (struct nn_pollfd *fds, int nfds, int timeout)
             sz = sizeof (fd);
             rc = nn_getsockopt (fds [i].fd, NN_SOL_SOCKET, NN_SNDFD, &fd, &sz);
             if (nn_slow (rc < 0)) {
-                errno = -rc;
                 return -1;
             }
             nn_assert (sz == sizeof (fd));
@@ -68,7 +66,7 @@ int nn_poll (struct nn_pollfd *fds, int nfds, int timeout)
     tv.tv_sec = timeout / 1000;
     tv.tv_usec = timeout % 1000 * 1000;
     if (nn_fast (nfds)) {
-        rc = select (-1, &fdset, NULL, NULL, &tv);
+        rc = select (-1, &fdset, NULL, NULL, timeout == -1 ? NULL : &tv);
         if (nn_slow (rc == 0))
             return 0;
         if (nn_slow (rc == SOCKET_ERROR)) {
@@ -147,7 +145,6 @@ int nn_poll (struct nn_pollfd *fds, int nfds, int timeout)
             rc = nn_getsockopt (fds [i].fd, NN_SOL_SOCKET, NN_RCVFD, &fd, &sz);
             if (nn_slow (rc < 0)) {
                 nn_free (pfd);
-                errno = -rc;
                 return -1;
             }
             nn_assert (sz == sizeof (fd));
@@ -160,7 +157,6 @@ int nn_poll (struct nn_pollfd *fds, int nfds, int timeout)
             rc = nn_getsockopt (fds [i].fd, NN_SOL_SOCKET, NN_SNDFD, &fd, &sz);
             if (nn_slow (rc < 0)) {
                 nn_free (pfd);
-                errno = -rc;
                 return -1;
             }
             nn_assert (sz == sizeof (fd));

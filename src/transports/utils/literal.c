@@ -1,5 +1,6 @@
 /*
     Copyright (c) 2012-2013 Martin Sustrik  All rights reserved.
+    Copyright 2022 Staysail Systems, Inc.
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"),
@@ -28,49 +29,30 @@
 #include <string.h>
 
 #ifndef NN_HAVE_WINDOWS
+#include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#endif
-
-/*  On Windows XS there's no inet_pton() function. */
-#if defined NN_HAVE_WINDOWS && ((_WIN32_WINNT <= 0x0501) || (WINVER <= 0x0501))
-
-static int nn_inet_pton(int family, const char *src, void *dst)
-{
-    int rc;
-    struct sockaddr_storage addr;
-    int addr_len = sizeof(addr);
-
-    if (nn_slow (family != AF_INET && family != AF_INET6)) {
-        errno = EAFNOSUPPORT;
-        return -1;
-    }
-
-    addr.ss_family = family;
-    rc = WSAStringToAddressA ((char*) src, family, NULL,
-        (struct sockaddr*) &addr, &addr_len);
-    if (rc != 0)
-        return 0;
-
-    if (family == AF_INET) {
-        memcpy(dst, &((struct sockaddr_in *) &addr)->sin_addr,
-            sizeof(struct in_addr));
-    } else if (family == AF_INET6) {
-        memcpy(dst, &((struct sockaddr_in6 *)&addr)->sin6_addr,
-            sizeof(struct in6_addr));
-    }
-
-    return 1;
-}
-
 #else
-
-static int nn_inet_pton(int family, const char *src, void *dst)
-{
-    return inet_pton (family, src, dst);
-}
-
+#include <winsock.h>
 #endif
+
+void nn_literal_link_local_resolve(struct in6_addr *in6addr, int64_t *sin6_scope_id, char *addr)
+{
+    if (! IN6_IS_ADDR_LINKLOCAL(in6addr)) {
+        return;
+    }
+    struct addrinfo hints, *res;
+    memset (&hints, 0, sizeof (hints));
+    hints.ai_family = AF_INET6;
+    hints.ai_socktype = 0;
+    hints.ai_flags = AI_NUMERICHOST;
+    int rc = getaddrinfo(addr, NULL, &hints, &res);
+    if (0 == rc && res) {
+        struct sockaddr_in6 * curr = ((struct sockaddr_in6 *) res->ai_addr);
+        // set scope_id
+        *sin6_scope_id = (int64_t) curr->sin6_scope_id;
+    }
+}
 
 int nn_literal_resolve (const char *addr, size_t addrlen,
     int ipv4only, struct sockaddr_storage *result, size_t *resultlen)
@@ -80,6 +62,8 @@ int nn_literal_resolve (const char *addr, size_t addrlen,
         INET6_ADDRSTRLEN :  INET_ADDRSTRLEN];
     struct in_addr inaddr;
     struct in6_addr in6addr;
+    int64_t sin6_scope_id = -1;
+    char *ifname_dindex = NULL;     // pointer to ifname's delimiter, '%'
 
     /*  Try to treat the address as a literal string. If the size of
         the address is larger than longest possible literal, skip the step.
@@ -101,11 +85,25 @@ int nn_literal_resolve (const char *addr, size_t addrlen,
 
     /*  Try to interpret the literal as an IPv6 address. */
     if (!ipv4only) {
-        rc = nn_inet_pton (AF_INET6, addrz, &in6addr);
-        if (rc == 1) {
+        // check if '%' exists in addrz (i.e. '$addr%$ifname')
+        ifname_dindex = strstr(addrz, "%");
+        if (NULL == ifname_dindex) {
+            rc = inet_pton (AF_INET6, addrz, &in6addr);
+        } else {
+            // set addrz[index] = '\0', so that inet_pton won't fail
+            *ifname_dindex = '\0';
+            rc = inet_pton (AF_INET6, addrz, &in6addr);
+            // re-add the '%' so we'll be able to get the scope_id for link-local IPv6
+            *ifname_dindex = '%';
+        }
+        if (1 == rc) {
             if (result) {
+                nn_literal_link_local_resolve(&in6addr, &sin6_scope_id, addrz);
                 result->ss_family = AF_INET6;
                 ((struct sockaddr_in6*) result)->sin6_addr = in6addr;
+                if (-1 < sin6_scope_id) {
+                    ((struct sockaddr_in6*) result)->sin6_scope_id = (uint32_t) sin6_scope_id;
+                }
              }
              if (resultlen)
                 *resultlen = sizeof (struct sockaddr_in6);
@@ -115,7 +113,7 @@ int nn_literal_resolve (const char *addr, size_t addrlen,
     }
 
     /*  Try to interpret the literal as an IPv4 address. */
-    rc = nn_inet_pton (AF_INET, addrz, &inaddr);
+    rc = inet_pton (AF_INET, addrz, &inaddr);
     if (rc == 1) {
         if (result) {
            result->ss_family = AF_INET;
