@@ -15,7 +15,7 @@ SYNOPSIS
 
 DESCRIPTION
 -----------
-In-process transport allows to send messages between threads or modules inside a
+In-process transport allows one to send messages between threads or modules inside a
 process. In-process address is an arbitrary case-sensitive string preceded by
 'inproc://' protocol specifier. All in-process addresses are visible from any
 module within the process. They are not visible from outside of the process.
@@ -32,7 +32,7 @@ The overall buffer size for an inproc connection is determined by NN_RCVBUF
 socket option on the receiving end of the connection. NN_SNDBUF socket option
 is ignored. In addition to the buffer, one message of arbitrary size will fit
 into the buffer. That way, even messages larger than the buffer can be
-transfered via inproc connection.
+transferred via inproc connection.
 
 EXAMPLE
 -------
